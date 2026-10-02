@@ -13,7 +13,7 @@
 // - STREAM_ADMIN_USER      (Secret)
 // - STREAM_ADMIN_PASSWORD  (Secret)
 // - STREAM_SID = 1
-// - ADMIN_TOKEN            (Secret, optional)
+// - ADMIN_TOKEN            (Secret, required for admin actions)
 //
 // Optional:
 // - NOWPLAYING_URL                  = admin.cgi/viewxml oder externer JSON/XML Status, NICHT /stream
@@ -21,7 +21,7 @@
 // - RADIO_AUTODJ_PLAYLIST_SWITCH_URL= nur wenn echter SonicPanel-Request bekannt
 // ============================================================
 
-const VERSION = "v1.2.1-real-skip-no-listener-spike";
+const VERSION = "v1.2.2-real-skip-fail-closed";
 const WORKER_NAME = "666myidjstreamadmin";
 
 const JSON_HEADERS = {
@@ -97,7 +97,9 @@ function bearerToken(request) {
 
 function requireAdmin(request, env) {
   const expected = env.ADMIN_TOKEN || "";
-  if (!expected) return { ok: true, mode: "admin-token-not-configured" };
+  if (!expected) {
+    return { ok: false, status: 503, reason: "ADMIN_TOKEN_NOT_CONFIGURED" };
+  }
 
   const xToken = request.headers.get("x-admin-token") || "";
   const bToken = bearerToken(request);
