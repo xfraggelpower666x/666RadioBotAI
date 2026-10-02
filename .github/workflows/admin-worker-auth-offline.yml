@@ -1,0 +1,25 @@
+name: Radio Admin Worker — offline security regression
+on:
+  pull_request:
+    paths:
+      - 'Workers/666myidjstreamadmin/**'
+      - '.github/workflows/admin-worker-auth-offline.yml'
+  push:
+    branches:
+      - 'repair/force-audit-2026-10-02-admin-worker-hardening'
+    paths:
+      - 'Workers/666myidjstreamadmin/**'
+      - '.github/workflows/admin-worker-auth-offline.yml'
+permissions:
+  contents: read
+jobs:
+  offline-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run offline negative auth and no-network tests
+        run: node --test Workers/666myidjstreamadmin/tests/auth_negative.test.mjs
