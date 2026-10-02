@@ -48,3 +48,50 @@ test('nowplaying safety rejects raw stream URL without initiating fetch', async 
     globalThis.fetch = previous;
   }
 });
+
+
+const credentials = {ADMIN_TOKEN:'test-only-opaque-token',STREAM_ADMIN_USER:'local-test',STREAM_ADMIN_PASSWORD:'local-test',STREAM_ADMIN_BASE_URL:'https://upstream.example.test/admin.cgi',STREAM_SID:'1'};
+async function invoke(path='/admin/autodj/skip',env=credentials,upstream=()=>{throw new Error('NETWORK_FORBIDDEN');},token='test-only-opaque-token') {
+  const previous=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async (url,options)=>{calls.push({url:String(url),options});return await upstream(url,options);};
+  try {const response=await worker.fetch(new Request('https://worker.invalid'+path,{method:'POST',headers:{'x-admin-token':token}}),env);return {response,calls};}
+  finally {globalThis.fetch=previous;}
+}
+test('wrong token denies privileged skip with 401 and zero upstream calls', async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',credentials,()=>{throw Error('UNEXPECTED_FETCH');},'wrong-token');
+ assert.equal(response.status,401);assert.equal(calls.length,0);
+});
+test('configured admin token with missing upstream username/password fails closed', async()=>{
+ const env={ADMIN_TOKEN:credentials.ADMIN_TOKEN,STREAM_ADMIN_BASE_URL:credentials.STREAM_ADMIN_BASE_URL};
+ const {response,calls}=await invoke('/admin/autodj/skip',env);
+ assert.equal(response.status,503);assert.equal((await response.json()).error,'ADMIN_UPSTREAM_CREDENTIALS_NOT_CONFIGURED');assert.equal(calls.length,0);
+});
+test('legacy HTTP admin URL is blocked before credentials leave Worker', async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',{...credentials,STREAM_ADMIN_BASE_URL:'http://my.idjstream.com:8686/admin.cgi'});
+ assert.equal(response.status,503);assert.equal((await response.json()).error,'SECURE_ADMIN_TRANSPORT_REQUIRED');assert.equal(calls.length,0);
+});
+test('200 HTML login page is never a successful skip; response body is not exposed',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',credentials,()=>new Response('<html><form>Password: fake-value</form></html>',{status:200,headers:{'content-type':'text/html'}}));
+ const data=await response.json();assert.equal(response.status,502);assert.equal(data.ok,false);assert.equal(data.upstreamAccepted,false);assert.equal(data.verified,false);assert.equal(JSON.stringify(data).includes('fake-value'),false);assert.equal(calls.length,1);
+});
+test('upstream 200 text acknowledges request but not actual track change',async()=>{
+ const {response}=await invoke('/admin/autodj/skip',credentials,()=>new Response('OK',{status:200,headers:{'content-type':'text/plain'}}));
+ const data=await response.json();assert.equal(response.status,202);assert.equal(data.ok,false);assert.equal(data.upstreamAccepted,true);assert.equal(data.verified,false);
+});
+test('Worker disables follow-redirect on upstream request',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',credentials,()=>new Response('',{status:302,headers:{location:'https://other.example.test/'}}));
+ assert.equal(response.status,502);assert.equal(calls.length,1);assert.equal(calls[0].options.redirect,'manual');
+});
+test('playlist switch with insecure HTTP override cannot send admin credentials',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/playlist-switch',{...credentials,RADIO_AUTODJ_PLAYLIST_SWITCH_URL:'http://other.example.test/switch'});
+ assert.equal(response.status,503);assert.equal(calls.length,0);
+});
+test('credentials in upstream URL are blocked even if HTTPS',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',{...credentials,STREAM_ADMIN_BASE_URL:'https://user:password@upstream.example.test/admin.cgi'});
+ assert.equal(response.status,503);assert.equal(calls.length,0);
+});
+test('private upstream exceptions do not expose request error secrets',async()=>{
+ const {response}=await invoke('/admin/autodj/skip',credentials,()=>{throw Error('PRIVATE_UPSTREAM_SECRET');});
+ const data=await response.json();assert.equal(response.status,500);assert.equal(JSON.stringify(data).includes('PRIVATE_UPSTREAM_SECRET'),false);
+});
