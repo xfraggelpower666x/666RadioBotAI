@@ -95,3 +95,23 @@ test('private upstream exceptions do not expose request error secrets',async()=>
  const {response}=await invoke('/admin/autodj/skip',credentials,()=>{throw Error('PRIVATE_UPSTREAM_SECRET');});
  const data=await response.json();assert.equal(response.status,500);assert.equal(JSON.stringify(data).includes('PRIVATE_UPSTREAM_SECRET'),false);
 });
+
+test('NowPlaying with HTTP admin basic auth fails closed with zero network calls',async()=>{
+ const previous=globalThis.fetch;let calls=0;globalThis.fetch=async()=>{calls++;throw Error('UNEXPECTED_FETCH');};
+ try {
+  const response=await worker.fetch(new Request('https://worker.invalid/nowplaying'),{NOWPLAYING_URL:'http://my.idjstream.com:8686/admin.cgi?mode=viewxml',STREAM_ADMIN_USER:'local-user',STREAM_ADMIN_PASSWORD:'local-secret'});
+  assert.equal(response.status,503);assert.equal((await response.json()).error,'SECURE_ADMIN_TRANSPORT_REQUIRED');assert.equal(calls,0);
+ } finally {globalThis.fetch=previous;}
+});
+test('cross-host HTTPS override cannot receive radio admin credentials',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',{...credentials,RADIO_AUTODJ_SKIP_URL:'https://malicious.example.test/skip'});
+ assert.equal(response.status,503);assert.equal((await response.json()).error,'ADMIN_TARGET_HOST_MISMATCH');assert.equal(calls.length,0);
+});
+test('HTTPS same-host override remains requestable, but success remains unverified',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',{...credentials,RADIO_AUTODJ_SKIP_URL:'https://upstream.example.test/skip'},()=>new Response('accepted',{status:200,headers:{'content-type':'text/plain'}}));
+ const data=await response.json();assert.equal(response.status,202);assert.equal(data.ok,false);assert.equal(data.verified,false);assert.equal(calls.length,1);assert.equal(calls[0].options.method,'POST');
+});
+test('cross-port HTTPS override is rejected',async()=>{
+ const {response,calls}=await invoke('/admin/autodj/skip',{...credentials,RADIO_AUTODJ_SKIP_URL:'https://upstream.example.test:8443/skip'});
+ assert.equal(response.status,503);assert.equal(calls.length,0);
+});
