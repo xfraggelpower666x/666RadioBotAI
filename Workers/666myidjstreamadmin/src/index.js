@@ -135,6 +135,13 @@ function buildAdminUrl(env, params = {}) {
 }
 
 async function fetchText(url, options = {}) {
+  const headerKeys = Object.keys(options.headers || {}).map(key => key.toLowerCase());
+  if (headerKeys.includes("authorization")) {
+    const transport = new URL(url);
+    if (transport.protocol !== "https:" || transport.username || transport.password) {
+      return { status: 503, ok: false, text: JSON.stringify({ ok: false, error: "SECURE_ADMIN_TRANSPORT_REQUIRED" }), contentType: "application/json; charset=utf-8" };
+    }
+  }
   const res = await fetch(url, {
     ...options,
     cache: "no-store",
@@ -166,6 +173,10 @@ function verifyAdminTransport(env, target) {
     const parsed = new URL(target);
     if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
       return { ok: false, error: "SECURE_ADMIN_TRANSPORT_REQUIRED", status: 503 };
+    }
+    const expected = new URL(env.STREAM_ADMIN_BASE_URL || "");
+    if (expected.protocol !== "https:" || expected.hostname !== parsed.hostname || expected.port !== parsed.port) {
+      return { ok: false, error: "ADMIN_TARGET_HOST_MISMATCH", status: 503 };
     }
   } catch {
     return { ok: false, error: "INVALID_ADMIN_TARGET", status: 503 };
