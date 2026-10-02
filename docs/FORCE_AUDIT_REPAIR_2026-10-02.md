@@ -81,3 +81,11 @@ Apply the Admin Worker hardening patch to `Workers/666myidjstreamadmin/src/index
 curl -i -X POST https://666myidjstreamadmin.666soundsdesign-broadcaster.com/admin/autodj/skip
 # expected without token after repair: HTTP 503 if ADMIN_TOKEN missing, HTTP 401 if token configured but not supplied
 ```
+
+## FORCE update — secured upstream DEV gate (2026-10-02)
+
+The newer Worker code introduces fail-closed HTTPS upstream protection, cross-host/port mutation refusal, disabled redirects and unverified-acceptance semantics for Skip. Focused offline negative tests have been extended to 17 cases. GitHub Actions runs `37007369895` and `37007376658` completed successfully at commit `9666b7228e56dd91e9c61c21e7d417163de37e32`.
+
+**Do not deploy as an operational AutoDJ-skip update yet.** The current `wrangler.toml` still declares HTTP `STREAM_ADMIN_BASE_URL` and `NOWPLAYING_URL`. Under the new guard, authenticated admin operations intentionally fail closed against these endpoints. Before release, establish a verified HTTPS admin endpoint/proxy with proper authorization and test against the actual SHOUTcast response; obtain separate deployment approval. HTTP 202/`upstreamAccepted` does not prove a track change. No Cloudflare deploy, production merge, real skip or credential/secret verification was performed in this update.
+
+Compatibility: the earlier Python Lavalink/Vocard overlay is not the production RadioBotAI application, and no overlay code was installed. Existing radio player, sport/spot and Discord behaviors remain out of this Worker patch.
