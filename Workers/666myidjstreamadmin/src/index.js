@@ -21,7 +21,7 @@
 // - RADIO_AUTODJ_PLAYLIST_SWITCH_URL= nur wenn echter SonicPanel-Request bekannt
 // ============================================================
 
-const VERSION = "v1.2.2-real-skip-fail-closed";
+const VERSION = "v1.2.3-real-skip-upstream-guard-dev";
 const WORKER_NAME = "666myidjstreamadmin";
 
 const JSON_HEADERS = {
@@ -138,6 +138,7 @@ async function fetchText(url, options = {}) {
   const res = await fetch(url, {
     ...options,
     cache: "no-store",
+    redirect: "manual",
     headers: {
       "accept": "application/json,text/xml,text/plain,*/*",
       ...(options.headers || {})
@@ -155,6 +156,21 @@ async function fetchText(url, options = {}) {
 function adminHeaders(env) {
   const basic = basicAuthHeader(env);
   return basic ? { authorization: basic } : {};
+}
+
+function verifyAdminTransport(env, target) {
+  if (!env.STREAM_ADMIN_USER || !env.STREAM_ADMIN_PASSWORD) {
+    return { ok: false, error: "ADMIN_UPSTREAM_CREDENTIALS_NOT_CONFIGURED", status: 503 };
+  }
+  try {
+    const parsed = new URL(target);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      return { ok: false, error: "SECURE_ADMIN_TRANSPORT_REQUIRED", status: 503 };
+    }
+  } catch {
+    return { ok: false, error: "INVALID_ADMIN_TARGET", status: 503 };
+  }
+  return { ok: true };
 }
 
 async function readNowPlaying(env) {
@@ -206,6 +222,9 @@ async function handleSkip(request, env) {
     }, 503);
   }
 
+  const guard = verifyAdminTransport(env, target);
+  if (!guard.ok) return json({ ok: false, error: guard.error }, guard.status);
+
   const method = env.RADIO_AUTODJ_SKIP_URL ? "POST" : "GET";
   const startedAt = Date.now();
 
@@ -218,19 +237,22 @@ async function handleSkip(request, env) {
     body: method === "POST" ? "{}" : undefined
   });
 
+  const htmlResponse = /text\/html/i.test(result.contentType) || /<(?:!doctype\s+html|html|form)\b/i.test(result.text.slice(0, 350));
+  const accepted = result.ok && !htmlResponse;
   return json({
-    ok: result.ok,
+    ok: false,
+    upstreamAccepted: accepted,
+    verified: false,
     action: "skip",
     status: result.status,
     durationMs: Date.now() - startedAt,
     targetMode: target.includes("admin.cgi") ? "SHOUTCAST_ADMIN_CGI" : "DIRECT_OVERRIDE",
     verifyAfterMs: 10000,
     listenerSpikeGuard: "ACTIVE_NO_FRONTEND_STREAM_FETCH",
-    message: result.ok
-      ? "Skip-Befehl angenommen. AutoDJ nach 10 Sekunden neu prüfen."
-      : "Skip-Befehl fehlgeschlagen.",
-    responsePreview: result.text.slice(0, 800)
-  }, result.ok ? 200 : 502);
+    message: accepted
+      ? "Upstream-Aufruf angenommen; Trackwechsel noch nicht nachgewiesen."
+      : "Skip-Befehl nicht verifizierbar; Admin-Aktion nicht als erfolgreich behandeln."
+  }, accepted ? 202 : 502);
 }
 
 async function handlePlaylistSwitch(request, env) {
@@ -247,6 +269,9 @@ async function handlePlaylistSwitch(request, env) {
     }, 501);
   }
 
+  const guard = verifyAdminTransport(env, env.RADIO_AUTODJ_PLAYLIST_SWITCH_URL);
+  if (!guard.ok) return json({ ok: false, error: guard.error }, guard.status);
+
   const bodyText = await request.text().catch(() => "{}");
   const result = await fetchText(env.RADIO_AUTODJ_PLAYLIST_SWITCH_URL, {
     method: "POST",
@@ -262,8 +287,9 @@ async function handlePlaylistSwitch(request, env) {
     action: "playlist-switch",
     status: result.status,
     targetMode: "CONFIRMED_DIRECT_OVERRIDE",
-    responsePreview: result.text.slice(0, 800)
-  }, result.ok ? 200 : 502);
+    verified: false,
+    note: "Playlist-Änderung benötigt unabhängiges Readback"
+  }, result.ok ? 202 : 502);
 }
 
 async function handleStreamStatus(request, env) {
@@ -273,6 +299,8 @@ async function handleStreamStatus(request, env) {
   const target = buildAdminUrl(env, { mode: "viewxml" });
   if (!target) return json({ ok: false, error: "STREAM_STATUS_TARGET_NOT_CONFIGURED" }, 503);
 
+  const guard = verifyAdminTransport(env, target);
+  if (!guard.ok) return json({ ok: false, error: guard.error }, guard.status);
   const result = await fetchText(target, { method: "GET", headers: adminHeaders(env) });
   return new Response(result.text, {
     status: result.status,
@@ -371,7 +399,7 @@ export default {
       return json({
         ok: false,
         error: "WORKER_EXCEPTION",
-        message: String(err && err.message ? err.message : err)
+        message: "Request failed; internal details withheld"
       }, 500);
     }
   }
