@@ -1,0 +1,15 @@
+--- a/Workers/666myidjstreamadmin/src/index.js
++++ b/Workers/666myidjstreamadmin/src/index.js
+@@
+-const VERSION = "v1.2.1-real-skip-no-listener-spike";
++const VERSION = "v1.2.2-real-skip-fail-closed";
+@@
+ function requireAdmin(request, env) {
+   const expected = env.ADMIN_TOKEN || "";
+-  if (!expected) return { ok: true, mode: "admin-token-not-configured" };
++  if (!expected) {
++    return { ok: false, status: 503, reason: "ADMIN_TOKEN_NOT_CONFIGURED" };
++  }
+ 
+   const xToken = request.headers.get("x-admin-token") || "";
+   const bToken = bearerToken(request);

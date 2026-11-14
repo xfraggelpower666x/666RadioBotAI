@@ -1,0 +1,31 @@
+# 666RadioBotAI local/runtime secrets and generated state
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+
+# Python runtime/cache
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local runtime data
+runtime/
+db/*.sqlite
+db/*.sqlite3
+db/*.db
+music/
+
+# Node / Worker local state
+node_modules/
+.wrangler/
+dist/
+build/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
